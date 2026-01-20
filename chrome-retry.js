@@ -2,15 +2,15 @@
 // The back-off is the duration between retries and increases exponentially with the number of retries.
 // For Chrome versions <120, back-offs less than one minute (60 000) will likely be inaccurate in production.
 // For Chrome versions >120, back-offs less than 30 seconds (30 000) will likely be inaccurate in production.
-const CHROME_RETRY_INITIAL_BACKOFF = 60000; // 1 minute
+const CHROME_RETRY_INITIAL_BACKOFF = 5000; // 5 seconds
 
 // The maximum back-off is the maximum delay between requests excluding the jitter.
-const CHROME_RETRY_MAXIMUM_BACKOFF = 1200000; // 20 minutes
+const CHROME_RETRY_MAXIMUM_BACKOFF = 60000; // 1 minute
 
 // The jitter, in milliseconds, that should be used with re-tries.
 // If multiple browsers use this extension, navigation failures may synchronise and cause spikes
 // in traffic for the target website. Jitter prevents this by spreading out the requests.
-const CHROME_RETRY_JITTER = 20000; // 20 seconds
+const CHROME_RETRY_JITTER = 2500; // 2.5 seconds
 
 chrome.webNavigation.onErrorOccurred.addListener(async details => {
     const tabIdentifier = details.tabId;

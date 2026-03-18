@@ -1,3 +1,7 @@
+# v1.2.0
+- Added Firefox Support !!! :tada: :tada:
+- Rebranded as Browser Retry
+
 # v1.1.0
 
 ## Added

@@ -2,30 +2,32 @@
 // The back-off is the duration between retries and increases exponentially with the number of retries.
 // For Chrome versions <120, back-offs less than one minute (60 000) will likely be inaccurate in production.
 // For Chrome versions >120, back-offs less than 30 seconds (30 000) will likely be inaccurate in production.
-const CHROME_RETRY_INITIAL_BACKOFF = 5000; // 5 seconds
+const BROWSER_RETRY_INITIAL_BACKOFF = 5000; // 5 seconds
 
 // The maximum back-off is the maximum delay between requests excluding the jitter.
-const CHROME_RETRY_MAXIMUM_BACKOFF = 60000; // 1 minute
+const BROWSER_RETRY_MAXIMUM_BACKOFF = 60000; // 1 minute
 
 // The jitter, in milliseconds, that should be used with re-tries.
 // If multiple browsers use this extension, navigation failures may synchronise and cause spikes
 // in traffic for the target website. Jitter prevents this by spreading out the requests.
-const CHROME_RETRY_JITTER = 2500; // 2.5 seconds
+const BROWSER_RETRY_JITTER = 2500; // 2.5 seconds
+
+const _browser = typeof browser === 'undefined' ? chrome : browser;
 
 async function handleTabError(tabIdentifier, type) {
     await deleteRetryStateForTab(tabIdentifier);
     const retriesSoFar = (await getRetryCount(tabIdentifier)) || 0;
-    const backoff = Math.min(CHROME_RETRY_MAXIMUM_BACKOFF, CHROME_RETRY_INITIAL_BACKOFF * Math.pow(2, retriesSoFar));
-    const jitter = Math.round(Math.random() * CHROME_RETRY_JITTER);
+    const backoff = Math.min(BROWSER_RETRY_MAXIMUM_BACKOFF, BROWSER_RETRY_INITIAL_BACKOFF * Math.pow(2, retriesSoFar));
+    const jitter = Math.round(Math.random() * BROWSER_RETRY_JITTER);
     const timeToWaitInMilliseconds = backoff + jitter;
 
     if (await getAlarmForTab(tabIdentifier)) {
-        console.debug(`Chrome Retry detected another error on tab ${tabIdentifier}, but a new reload was not scheduled because one is already pending.`);
+        console.debug(`Browser Retry detected another error on tab ${tabIdentifier}, but a new reload was not scheduled because one is already pending.`);
         return;
     }
 
     await setAlarmForTab(tabIdentifier, timeToWaitInMilliseconds);
-    console.log(`Chrome Retry detected a ${type} error on tab ${tabIdentifier}. The current back-off is ${backoff} ms, so a reload has been scheduled ${timeToWaitInMilliseconds} ms from now.`);
+    console.log(`Browser Retry detected a ${type} error on tab ${tabIdentifier}. The current back-off is ${backoff} ms, so a reload has been scheduled ${timeToWaitInMilliseconds} ms from now.`);
 }
 
 async function handleTabSuccess(tabIdentifier, type) {
@@ -35,18 +37,18 @@ async function handleTabSuccess(tabIdentifier, type) {
             await deleteRetryCount(tabIdentifier);
             await deleteAlarmForTab(tabIdentifier);
             await deleteRetryStateForTab(tabIdentifier);
-            console.log(`Chrome Retry detected a successful load of tab ${tabIdentifier}.`);
+            console.log(`Browser Retry detected a successful load of tab ${tabIdentifier}.`);
             return;
         }
         case "navigation":
         case "web request": {
-            console.debug(`Chrome Retry detected ${retryState} success on tab ${tabIdentifier}. This is insufficient to consider it to be working.`);
+            console.debug(`Browser Retry detected ${retryState} success on tab ${tabIdentifier}. This is insufficient to consider it to be working.`);
             return;
         }
     }
 }
 
-chrome.webRequest.onCompleted.addListener(async details => {
+browser.webRequest.onCompleted.addListener(async details => {
     if (details.tabId < 0) return;
 
     if (details.statusCode >= 400 && details.statusCode < 600) await handleTabError(details.tabId, "web request");
@@ -54,21 +56,21 @@ chrome.webRequest.onCompleted.addListener(async details => {
 }, { urls: ["<all_urls>"], types: ["main_frame"] });
 
 
-chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
+_browser.webNavigation.onErrorOccurred.addListener(async (details) => {
     await handleTabError(details.tabId, "navigation")
 });
 
-chrome.webNavigation.onCommitted.addListener(async details => {
+_browser.webNavigation.onCommitted.addListener(async details => {
     await handleTabSuccess(details.tabId, "navigation");
 });
 
-chrome.alarms.onAlarm.addListener(async alarm => {
-    if (!alarm.name.startsWith(CHROME_RETRY_RELOAD_PREFIX)) return;
+_browser.alarms.onAlarm.addListener(async alarm => {
+    if (!alarm.name.startsWith(BROWSER_RETRY_RELOAD_PREFIX)) return;
 
     const tabIdentifier = getTabForAlarm(alarm);
-    const details = await chrome.tabs.get(tabIdentifier).catch(() => undefined);
+    const details = await _browser.tabs.get(tabIdentifier).catch(() => undefined);
     if (!details) {
-        console.log("Chrome Retry did not perform a scheduled reload, because the tab was closed before the retry timeout expired.");
+        console.log("Browser Retry did not perform a scheduled reload, because the tab was closed before the retry timeout expired.");
         await deleteRetryCount(tabIdentifier);
         return;
     }
@@ -83,15 +85,15 @@ chrome.alarms.onAlarm.addListener(async alarm => {
           ? `${-relativeTime} ms earlier than scheduled`
           : `$relativeTime ms later than scheduled`));
 
-    console.debug(`Chrome Retry is performing scheduled reload #${retriesSoFar + 1} for tab ${tabIdentifier} ${relativePhrase}.`);
+    console.debug(`Browser Retry is performing scheduled reload #${retriesSoFar + 1} for tab ${tabIdentifier} ${relativePhrase}.`);
 
     await setRetryCount(tabIdentifier, retriesSoFar + 1);
-    await chrome.tabs.reload(tabIdentifier);
+    await _browser.tabs.reload(tabIdentifier);
 });
 
-const CHROME_RETRY_STATE_SET_PREFIX = "chrome-retry:retry-state-set:";
+const BROWSER_RETRY_STATE_SET_PREFIX = "browser-retry:retry-state-set:";
 function getRetryStateSetKeyForTab(tabIdentifier) {
-    return `${CHROME_RETRY_STATE_SET_PREFIX}${tabIdentifier}`;
+    return `${BROWSER_RETRY_STATE_SET_PREFIX}${tabIdentifier}`;
 }
 
 function getRetryState(stateSet) {
@@ -105,11 +107,11 @@ function getRetryState(stateSet) {
 
 const internal = (() => {
     async function getRetryStateSetForTab(tabIdentifier) {
-        return new Set((await chrome.storage.session.get({ [getRetryStateSetKeyForTab(tabIdentifier)]: [] }))[getRetryStateSetKeyForTab(tabIdentifier)]);
+        return new Set((await _browser.storage.session.get({ [getRetryStateSetKeyForTab(tabIdentifier)]: [] }))[getRetryStateSetKeyForTab(tabIdentifier)]);
     }
 
     async function setRetryStateSetForTab(tabIdentifier, value) {
-        await chrome.storage.session.set({ [getRetryStateSetKeyForTab(tabIdentifier)]: value });
+        await _browser.storage.session.set({ [getRetryStateSetKeyForTab(tabIdentifier)]: value });
     }
 
     return {getRetryStateSetForTab, setRetryStateSetForTab};
@@ -124,54 +126,54 @@ async function addRetryStateForTab(tabIdentifier, type) {
 }
 
 async function deleteRetryStateForTab(tabIdentifier) {
-    await chrome.storage.session.remove(getRetryStateSetKeyForTab(tabIdentifier));
+    await _browser.storage.session.remove(getRetryStateSetKeyForTab(tabIdentifier));
 }
 
-const CHROME_RETRY_RELOAD_PREFIX = "chrome-retry:reload:";
+const BROWSER_RETRY_RELOAD_PREFIX = "browser-retry:reload:";
 
 function getAlarmNameForTab(tabIdentifier) {
-    return `${CHROME_RETRY_RELOAD_PREFIX}${tabIdentifier}`;
+    return `${BROWSER_RETRY_RELOAD_PREFIX}${tabIdentifier}`;
 }
 
 async function getAlarmForTab(tabIdentifier) {
-    return await chrome.alarms.get(getAlarmNameForTab(tabIdentifier));
+    return await _browser.alarms.get(getAlarmNameForTab(tabIdentifier));
 }
 
 async function setAlarmForTab(tabIdentifier, timeToWaitInMilliseconds) {
-    await chrome.alarms.create(getAlarmNameForTab(tabIdentifier),
+    await _browser.alarms.create(getAlarmNameForTab(tabIdentifier),
         { when: Date.now() + timeToWaitInMilliseconds });
 }
 
 async function deleteAlarmForTab(tabIdentifier) {
-    await chrome.alarms.clear(getAlarmNameForTab(tabIdentifier));
+    await _browser.alarms.clear(getAlarmNameForTab(tabIdentifier));
 }
 
 function getTabForAlarm(alarm) {
     // As per specification, tabId is a Number, which includes floats.
     // For integer values, parseFloat will return an equivalent Number to parseInt.
-    return parseFloat(alarm.name.substring(CHROME_RETRY_RELOAD_PREFIX.length));
+    return parseFloat(alarm.name.substring(BROWSER_RETRY_RELOAD_PREFIX.length));
 }
 
-const CHROME_RETRY_RETRIES_PREFIX = "chrome-retry:retries:";
+const BROWSER_RETRY_RETRIES_PREFIX = "browser-retry:retries:";
 
 function getStorageIndexForTab(tabIdentifier) {
-    return `${CHROME_RETRY_RETRIES_PREFIX}${tabIdentifier}`;
+    return `${BROWSER_RETRY_RETRIES_PREFIX}${tabIdentifier}`;
 }
 
 async function getRetryCount(tabIdentifier) {
     const index = getStorageIndexForTab(tabIdentifier);
-    return (await chrome.storage.session.get({ [index]: 0 }))[index];
+    return (await _browser.storage.session.get({ [index]: 0 }))[index];
 }
 
 async function setRetryCount(tabIdentifier, retries) {
-    await chrome.storage.session.set({ [getStorageIndexForTab(tabIdentifier)]: retries });
+    await _browser.storage.session.set({ [getStorageIndexForTab(tabIdentifier)]: retries });
 }
 
 async function deleteRetryCount(tabIdentifier) {
-    await chrome.storage.session.remove(getStorageIndexForTab(tabIdentifier));
+    await _browser.storage.session.remove(getStorageIndexForTab(tabIdentifier));
 }
 
-chrome.alarms.clearAll().then(_ => { /* fire-and-forget */ });
-console.log("Chrome Retry service worker is up and running.");
-console.log(`Will start with ${CHROME_RETRY_INITIAL_BACKOFF} ms back-off, then advance exponentially to ${CHROME_RETRY_MAXIMUM_BACKOFF} ms.`);
-console.log(`Request times will jitter between 0 and ${CHROME_RETRY_JITTER} ms.`);
+browser.alarms.clearAll().then(_ => { /* fire-and-forget */ });
+console.log("Browser Retry service worker is up and running.");
+console.log(`Will start with ${BROWSER_RETRY_INITIAL_BACKOFF} ms back-off, then advance exponentially to ${BROWSER_RETRY_MAXIMUM_BACKOFF} ms.`);
+console.log(`Request times will jitter between 0 and ${BROWSER_RETRY_JITTER} ms.`);
